@@ -63,13 +63,12 @@ func setupStorageAndAPI(cctx *cli.Context) (context.Context, *RunContext, error)
 }
 
 func setupStorage(cctx *cli.Context) (*storage.Database, error) {
-	ctx := context.TODO()
-	db, err := storage.NewDatabase(ctx, cctx.String("db"), cctx.Int("db-pool-size"))
+	db, err := storage.NewDatabase(cctx.Context, cctx.String("db"), cctx.Int("db-pool-size"))
 	if err != nil {
 		return nil, xerrors.Errorf("new database: %w", err)
 	}
 
-	if err := db.Connect(ctx); err != nil {
+	if err := db.Connect(cctx.Context); err != nil {
 		if !errors.Is(err, storage.ErrSchemaTooOld) || !cctx.Bool("allow-schema-migration") {
 			return nil, xerrors.Errorf("connect database: %w", err)
 		}
@@ -78,20 +77,20 @@ func setupStorage(cctx *cli.Context) (*storage.Database, error) {
 
 		// Schema is out of data and we're allowed to do schema migrations
 		log.Info("Migrating schema to latest version")
-		err := db.MigrateSchema(ctx)
+		err := db.MigrateSchema(cctx.Context)
 		if err != nil {
 			return nil, xerrors.Errorf("migrate schema: %w", err)
 		}
 
 		// Try to connect again
-		if err := db.Connect(ctx); err != nil {
+		if err := db.Connect(cctx.Context); err != nil {
 			return nil, xerrors.Errorf("connect database: %w", err)
 		}
 	}
 
 	// Make sure the schema is a compatible with what this version of Visor requires
-	if err := db.VerifyCurrentSchema(ctx); err != nil {
-		db.Close(ctx)
+	if err := db.VerifyCurrentSchema(cctx.Context); err != nil {
+		db.Close(cctx.Context)
 		return nil, xerrors.Errorf("verify schema: %w", err)
 	}
 	return db, nil

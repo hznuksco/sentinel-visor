@@ -21,13 +21,12 @@ var Dot = &cli.Command{
 			return xerrors.Errorf("setup logging: %w", err)
 		}
 
-		ctx := context.TODO()
 		db, err := setupStorage(cctx)
 		if err != nil {
 			return xerrors.Errorf("setup storage and api: %w", err)
 		}
 		defer func() {
-			if err := db.Close(ctx); err != nil {
+			if err := db.Close(cctx.Context); err != nil {
 				log.Errorw("close database", "error", err)
 			}
 		}()
@@ -43,7 +42,7 @@ var Dot = &cli.Command{
 		endHeight := startHeight + desiredChainLen
 
 		var blks = make([]*blocks.BlockNode, desiredChainLen)
-		_, err = db.DB.QueryContext(ctx, &blks, `
+		_, err = db.DB.QueryContext(cctx.Context, &blks, `
 			select block, parent, b.miner, b.height, p.height as "parent_height"
 			from block_parents
 			inner join block_headers b on block_parents.block = b.cid
