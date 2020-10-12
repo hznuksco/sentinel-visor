@@ -53,15 +53,25 @@ func setupStorageAndAPI(cctx *cli.Context) (context.Context, *RunContext, error)
 		return nil, nil, xerrors.Errorf("get node api: %w", err)
 	}
 
-	db, err := storage.NewDatabase(ctx, cctx.String("db"), cctx.Int("db-pool-size"))
+	db, err := setupStorage(cctx)
 	if err != nil {
 		closer()
-		return nil, nil, xerrors.Errorf("new database: %w", err)
+		return nil, nil, err
+	}
+
+	return ctx, &RunContext{api, closer, db}, nil
+}
+
+func setupStorage(cctx *cli.Context) (*storage.Database, error) {
+	ctx := context.TODO()
+	db, err := storage.NewDatabase(ctx, cctx.String("db"), cctx.Int("db-pool-size"))
+	if err != nil {
+		return nil, xerrors.Errorf("new database: %w", err)
 	}
 
 	if err := db.Connect(ctx); err != nil {
 		if !errors.Is(err, storage.ErrSchemaTooOld) || !cctx.Bool("allow-schema-migration") {
-			return nil, nil, xerrors.Errorf("connect database: %w", err)
+			return nil, xerrors.Errorf("connect database: %w", err)
 		}
 
 		log.Infof("connect database: %v", err.Error())
@@ -70,25 +80,21 @@ func setupStorageAndAPI(cctx *cli.Context) (context.Context, *RunContext, error)
 		log.Info("Migrating schema to latest version")
 		err := db.MigrateSchema(ctx)
 		if err != nil {
-			closer()
-			return nil, nil, xerrors.Errorf("migrate schema: %w", err)
+			return nil, xerrors.Errorf("migrate schema: %w", err)
 		}
 
 		// Try to connect again
 		if err := db.Connect(ctx); err != nil {
-			closer()
-			return nil, nil, xerrors.Errorf("connect database: %w", err)
+			return nil, xerrors.Errorf("connect database: %w", err)
 		}
 	}
 
 	// Make sure the schema is a compatible with what this version of Visor requires
 	if err := db.VerifyCurrentSchema(ctx); err != nil {
-		closer()
 		db.Close(ctx)
-		return nil, nil, xerrors.Errorf("verify schema: %w", err)
+		return nil, xerrors.Errorf("verify schema: %w", err)
 	}
-
-	return ctx, &RunContext{api, closer, db}, nil
+	return db, nil
 }
 
 func setupTracing(cctx *cli.Context) (func(), error) {

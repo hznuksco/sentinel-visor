@@ -109,6 +109,7 @@ func main() {
 			commands.Migrate,
 			commands.Run,
 			commands.Debug,
+			commands.Dot,
 		},
 	}
 
