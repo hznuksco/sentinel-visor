@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"context"
 	"fmt"
-	"hash/crc32"
 	"strconv"
 
 	"github.com/urfave/cli/v2"
@@ -52,40 +50,9 @@ var Dot = &cli.Command{
 			return err
 		}
 
-		//d, err := blocks.Dot(os.Stdout)
-		//if err != nil {
-		//return err
-		//}
-
 		fmt.Println("digraph D {")
-
 		for _, b := range blks {
-			//bc, err := cid.Parse(b.Block)
-			//if err != nil {
-			//return err
-			//}
-
-			//_, has := hl[bc]
-
-			col := crc32.Checksum([]byte(b.Miner), crc32.MakeTable(crc32.Castagnoli))&0xc0c0c0c0 + 0x30303030
-
-			hasstr := ""
-			//if !has {
-			////col = 0xffffffff
-			//hasstr = " UNSYNCED"
-			//}
-
-			nulls := b.Height - b.ParentHeight - 1
-			for i := uint64(0); i < nulls; i++ {
-				name := b.Block + "NP" + fmt.Sprint(i)
-
-				fmt.Printf("%s [label = \"NULL:%d\", fillcolor = \"#ffddff\", style=filled, forcelabels=true]\n%s -> %s\n",
-					name, b.Height-nulls+i, name, b.Parent)
-
-				b.Parent = name
-			}
-
-			fmt.Printf("%s [label = \"%s:%d%s\", fillcolor = \"#%06x\", style=filled, forcelabels=true]\n%s -> %s\n", b.Block, b.Miner, b.Height, hasstr, col, b.Block, b.Parent)
+			fmt.Println(b.DotString())
 		}
 		fmt.Println("}")
 
