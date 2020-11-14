@@ -15,6 +15,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/sentinel-visor/metrics"
+	"github.com/filecoin-project/sentinel-visor/model"
 	"github.com/filecoin-project/sentinel-visor/model/actors/common"
 	init_ "github.com/filecoin-project/sentinel-visor/model/actors/init"
 	"github.com/filecoin-project/sentinel-visor/model/actors/market"
@@ -697,4 +698,13 @@ func (d *Database) MarkTipSetEconomicsComplete(ctx context.Context, tipset strin
 	}
 
 	return nil
+}
+
+func (d *Database) Persist(ctx context.Context, p model.PersistableWithTx) error {
+	stop := metrics.Timer(ctx, metrics.PersistDuration)
+	defer stop()
+
+	return d.DB.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		return p.PersistWithTx(ctx, tx)
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/go-pg/pg/v10"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/raulk/clock"
@@ -36,6 +37,7 @@ func NewChainEconomicsProcessor(d *storage.Database, opener lens.APIOpener, leas
 		minHeight:   minHeight,
 		maxHeight:   maxHeight,
 		clock:       clock.New(),
+		extracter:   &ChainEconomicsExtracter{},
 	}
 }
 
@@ -49,6 +51,7 @@ type ChainEconomics struct {
 	minHeight   int64         // limit processing to tipsets equal to or above this height
 	maxHeight   int64         // limit processing to tipsets equal to or below this height
 	clock       clock.Clock
+	extracter   *ChainEconomicsExtracter
 }
 
 // Run starts processing batches of tipsets until the context is done or
@@ -134,18 +137,9 @@ func (p *ChainEconomics) processItem(ctx context.Context, node lens.API, item *v
 		return xerrors.Errorf("get tipset: %w", err)
 	}
 
-	supply, err := node.StateVMCirculatingSupplyInternal(ctx, tsk)
+	ce, err := p.extracter.ProcessTipSet(ctx, node, ts)
 	if err != nil {
 		return err
-	}
-
-	ce := &chainmodel.ChainEconomics{
-		ParentStateRoot: ts.ParentState().String(),
-		VestedFil:       supply.FilVested.String(),
-		MinedFil:        supply.FilMined.String(),
-		BurntFil:        supply.FilBurnt.String(),
-		LockedFil:       supply.FilLocked.String(),
-		CirculatingFil:  supply.FilCirculating.String(),
 	}
 
 	log.Debugw("persisting tipset", "height", int64(ts.Height()))
@@ -157,4 +151,25 @@ func (p *ChainEconomics) processItem(ctx context.Context, node lens.API, item *v
 	}
 
 	return nil
+}
+
+type ChainEconomicsExtracter struct {
+}
+
+func (e *ChainEconomicsExtracter) ProcessTipSet(ctx context.Context, node lens.API, ts *types.TipSet) (*chainmodel.ChainEconomics, error) {
+	supply, err := node.StateVMCirculatingSupplyInternal(ctx, ts.Key())
+	if err != nil {
+		return nil, err
+	}
+
+	ce := &chainmodel.ChainEconomics{
+		ParentStateRoot: ts.ParentState().String(),
+		VestedFil:       supply.FilVested.String(),
+		MinedFil:        supply.FilMined.String(),
+		BurntFil:        supply.FilBurnt.String(),
+		LockedFil:       supply.FilLocked.String(),
+		CirculatingFil:  supply.FilCirculating.String(),
+	}
+
+	return ce, nil
 }

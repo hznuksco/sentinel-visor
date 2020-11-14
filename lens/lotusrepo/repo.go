@@ -9,16 +9,14 @@ import (
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/lotus/journal"
-	"github.com/filecoin-project/sentinel-visor/lens"
-	peer "github.com/libp2p/go-libp2p-peer"
-	"github.com/urfave/cli/v2"
-
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
+	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/chain/vm"
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
+	"github.com/filecoin-project/lotus/journal"
+	"github.com/filecoin-project/lotus/lib/blockstore"
 	"github.com/filecoin-project/lotus/lib/bufbstore"
 	"github.com/filecoin-project/lotus/lib/ulimit"
 	marketevents "github.com/filecoin-project/lotus/markets/loggers"
@@ -29,6 +27,11 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/urfave/cli/v2"
+
+	"github.com/filecoin-project/sentinel-visor/lens"
+	"github.com/filecoin-project/sentinel-visor/lens/lensutil"
 )
 
 type APIOpener struct {
@@ -36,7 +39,17 @@ type APIOpener struct {
 	rapi *RepoAPI
 }
 
+type BlockCache interface {
+	blockstore.Blockstore
+	SetUpstream(blockstore.Blockstore)
+	Close() error
+}
+
 func NewAPIOpener(c *cli.Context) (*APIOpener, lens.APICloser, error) {
+	return NewAPIOpenerWithBlockCache(c, nil)
+}
+
+func NewAPIOpenerWithBlockCache(c *cli.Context, cache BlockCache) (*APIOpener, lens.APICloser, error) {
 	rapi := RepoAPI{}
 
 	if _, _, err := ulimit.ManageFdLimit(); err != nil {
@@ -66,9 +79,22 @@ func NewAPIOpener(c *cli.Context) (*APIOpener, lens.APICloser, error) {
 		return nil, nil, err
 	}
 
+	sf := func() {
+		lr.Close()
+	}
+
 	bs, err := lr.Blockstore(repo.BlockstoreChain)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if cache != nil {
+		cache.SetUpstream(bs)
+		sf = func() {
+			lr.Close()
+			cache.Close()
+		}
+		bs = cache
 	}
 
 	mds, err := lr.Datastore("/metadata")
@@ -89,10 +115,6 @@ func NewAPIOpener(c *cli.Context) (*APIOpener, lens.APICloser, error) {
 	rapi.FullNodeAPI.StateAPI.StateManager = sm
 	rapi.FullNodeAPI.StateAPI.StateModuleAPI = &full.StateModule{Chain: cs, StateManager: sm}
 
-	sf := func() {
-		lr.Close()
-	}
-
 	rapi.Context = c.Context
 	rapi.cacheSize = c.Int("lens-cache-hint")
 	return &APIOpener{rapi: &rapi}, sf, nil
@@ -110,6 +132,10 @@ type RepoAPI struct {
 
 func (ra *RepoAPI) ComputeGasOutputs(gasUsed, gasLimit int64, baseFee, feeCap, gasPremium abi.TokenAmount) vm.GasOutputs {
 	return vm.ComputeGasOutputs(gasUsed, gasLimit, baseFee, feeCap, gasPremium)
+}
+
+func (ra *RepoAPI) GetExecutedMessageForTipset(ctx context.Context, ts, pts *types.TipSet) ([]*lens.ExecutedMessage, error) {
+	return lensutil.GetExecutedMessageForTipset(ctx, ra.FullNodeAPI.ChainAPI.Chain, ts, pts)
 }
 
 func (ra *RepoAPI) Store() adt.Store {

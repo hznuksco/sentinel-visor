@@ -12,6 +12,7 @@ import (
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
+	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/chain/vm"
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
 	"github.com/filecoin-project/lotus/journal"
@@ -21,13 +22,15 @@ import (
 	"github.com/filecoin-project/lotus/node/impl"
 	"github.com/filecoin-project/lotus/node/impl/full"
 	"github.com/filecoin-project/lotus/node/repo"
-	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/specs-actors/actors/runtime/proof"
 	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/urfave/cli/v2"
+
+	"github.com/filecoin-project/sentinel-visor/lens"
+	"github.com/filecoin-project/sentinel-visor/lens/lensutil"
 )
 
 type APIOpener struct {
@@ -103,6 +106,10 @@ type SQLAPI struct {
 
 func (ra *SQLAPI) ComputeGasOutputs(gasUsed, gasLimit int64, baseFee, feeCap, gasPremium abi.TokenAmount) vm.GasOutputs {
 	return vm.ComputeGasOutputs(gasUsed, gasLimit, baseFee, feeCap, gasPremium)
+}
+
+func (ra *SQLAPI) GetExecutedMessageForTipset(ctx context.Context, ts, pts *types.TipSet) ([]*lens.ExecutedMessage, error) {
+	return lensutil.GetExecutedMessageForTipset(ctx, ra.FullNodeAPI.ChainAPI.Chain, ts, pts)
 }
 
 func (ra *SQLAPI) Store() adt.Store {

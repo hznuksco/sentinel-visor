@@ -216,7 +216,6 @@ func (p *ActorStateChangeProcessor) processTipSet(ctx context.Context, node lens
 		})
 	}
 
-	ll.Debugw("persisting tipset", "state_changes", len(palist))
 	if err := p.storage.DB.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		return palist.PersistWithTx(ctx, tx)
 	}); err != nil {

@@ -9,17 +9,13 @@ import (
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/lotus/journal"
-	"github.com/filecoin-project/sentinel-visor/lens"
-	peer "github.com/libp2p/go-libp2p-peer"
-	"github.com/urfave/cli/v2"
-
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/chain/vm"
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
+	"github.com/filecoin-project/lotus/journal"
 	"github.com/filecoin-project/lotus/lib/bufbstore"
 	"github.com/filecoin-project/lotus/lib/ulimit"
 	marketevents "github.com/filecoin-project/lotus/markets/loggers"
@@ -30,7 +26,12 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/urfave/cli/v2"
 	"github.com/willscott/carbs"
+
+	"github.com/filecoin-project/sentinel-visor/lens"
+	"github.com/filecoin-project/sentinel-visor/lens/lensutil"
 )
 
 type APIOpener struct {
@@ -107,6 +108,10 @@ type CarAPI struct {
 
 func (ra *CarAPI) ComputeGasOutputs(gasUsed, gasLimit int64, baseFee, feeCap, gasPremium abi.TokenAmount) vm.GasOutputs {
 	return vm.ComputeGasOutputs(gasUsed, gasLimit, baseFee, feeCap, gasPremium)
+}
+
+func (ra *CarAPI) GetExecutedMessageForTipset(ctx context.Context, ts, pts *types.TipSet) ([]*lens.ExecutedMessage, error) {
+	return lensutil.GetExecutedMessageForTipset(ctx, ra.FullNodeAPI.ChainAPI.Chain, ts, pts)
 }
 
 func (ra *CarAPI) Store() adt.Store {

@@ -188,3 +188,7 @@ func (aw *APIWrapper) StateVMCirculatingSupplyInternal(ctx context.Context, tsk 
 	defer span.End()
 	return aw.FullNode.StateVMCirculatingSupplyInternal(ctx, tsk)
 }
+
+func (aw *APIWrapper) GetExecutedMessageForTipset(ctx context.Context, ts, pts *types.TipSet) ([]*lens.ExecutedMessage, error) {
+	panic("not implemented yet")
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/builtin"
 	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	builtin2 "github.com/filecoin-project/specs-actors/v2/actors/builtin"
+	"github.com/go-pg/pg/v10"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/raulk/clock"
@@ -65,7 +66,7 @@ type ActorStateAPI interface {
 
 // An ActorStateExtractor extracts actor state into a persistable format
 type ActorStateExtractor interface {
-	Extract(ctx context.Context, a ActorInfo, node ActorStateAPI) (model.Persistable, error)
+	Extract(ctx context.Context, a ActorInfo, node ActorStateAPI) (model.PersistableWithTx, error)
 }
 
 // All supported actor state extractors
@@ -93,6 +94,13 @@ func SupportedActorCodes() []cid.Cid {
 		codes = append(codes, code)
 	}
 	return codes
+}
+
+func GetActorStateExtractor(code cid.Cid) (ActorStateExtractor, bool) {
+	extractorsMu.Lock()
+	defer extractorsMu.Unlock()
+	ase, ok := extractors[code]
+	return ase, ok
 }
 
 func NewActorStateProcessor(d *storage.Database, opener lens.APIOpener, leaseLength time.Duration, batchSize int, minHeight, maxHeight int64, actorCodes []cid.Cid, useLeases bool) (*ActorStateProcessor, error) {
@@ -276,7 +284,7 @@ func (p *ActorStateProcessor) processBatch(ctx context.Context, node lens.API) (
 			continue
 		}
 
-		if err := p.processActor(ctx, node, info); err != nil {
+		if err := p.processAndPersistActor(ctx, node, info); err != nil {
 			errorLog.Errorw("process actor", "error", err.Error())
 			if err := p.storage.MarkActorComplete(ctx, actor.Height, actor.Head, actor.Code, p.clock.Now(), err.Error()); err != nil {
 				errorLog.Errorw("failed to mark actor complete", "error", err.Error())
@@ -293,42 +301,55 @@ func (p *ActorStateProcessor) processBatch(ctx context.Context, node lens.API) (
 	return false, nil
 }
 
-func (p *ActorStateProcessor) processActor(ctx context.Context, node lens.API, info ActorInfo) error {
-	ctx, span := global.Tracer("").Start(ctx, "ActorStateProcessor.processActor")
+func (p *ActorStateProcessor) ProcessActor(ctx context.Context, node lens.API, info ActorInfo) (model.PersistableWithTx, model.PersistableWithTx, error) {
+	ctx, span := global.Tracer("").Start(ctx, "ActorStateProcessor.ProcessActor")
 	defer span.End()
-
-	var ae ActorExtractor
-
-	// Persist the raw state
-	data, err := ae.Extract(ctx, info, node)
-	if err != nil {
-		return xerrors.Errorf("extract actor state: %w", err)
-	}
-	if err := data.Persist(ctx, p.storage.DB); err != nil {
-		return xerrors.Errorf("persisting raw state: %w", err)
-	}
 
 	// Find a specific extractor for the actor type
 	extractor, exists := p.extractors[info.Actor.Code]
 	if !exists {
-		return xerrors.Errorf("no extractor defined for actor code %q", info.Actor.Code.String())
+		return nil, nil, xerrors.Errorf("no extractor defined for actor code %q", info.Actor.Code.String())
 	}
 
 	ctx, _ = tag.New(ctx, tag.Upsert(metrics.TaskType, ActorNameByCode(info.Actor.Code)))
 	span.SetAttribute("actor", ActorNameByCode(info.Actor.Code))
 
-	data, err = extractor.Extract(ctx, info, node)
+	// Extract raw state
+	var ae ActorExtractor
+	raw, err := ae.Extract(ctx, info, node)
 	if err != nil {
-		return xerrors.Errorf("extract actor state: %w", err)
+		return nil, nil, xerrors.Errorf("extract actor state: %w", err)
 	}
 
-	log.Debugw("persisting extracted state", "addr", info.Address.String())
-
-	if err := data.Persist(ctx, p.storage.DB); err != nil {
-		return xerrors.Errorf("persisting extracted state: %w", err)
+	// Parse state
+	parsed, err := extractor.Extract(ctx, info, node)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("extract actor state: %w", err)
 	}
 
-	return nil
+	return raw, parsed, nil
+}
+
+func (p *ActorStateProcessor) processAndPersistActor(ctx context.Context, node lens.API, info ActorInfo) error {
+	ctx, span := global.Tracer("").Start(ctx, "ActorStateProcessor.processAndPersistActor")
+	defer span.End()
+
+	raw, parsed, err := p.ProcessActor(ctx, node, info)
+	if err != nil {
+		return err
+	}
+
+	return p.storage.DB.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		if err := raw.PersistWithTx(ctx, tx); err != nil {
+			return xerrors.Errorf("persisting raw state: %w", err)
+		}
+
+		if err := parsed.PersistWithTx(ctx, tx); err != nil {
+			return xerrors.Errorf("persisting parsed state: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func NewActorInfo(a *visor.ProcessingActor) (ActorInfo, error) {

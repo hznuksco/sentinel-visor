@@ -168,14 +168,44 @@ func (p *MessageProcessor) processItem(ctx context.Context, node lens.API, item 
 		return xerrors.Errorf("get tipset: %w", err)
 	}
 
-	if err := p.processTipSet(ctx, node, ts); err != nil {
+	if err := p.processAndPersistTipSet(ctx, node, ts); err != nil {
 		return xerrors.Errorf("process tipset: %w", err)
 	}
 
 	return nil
 }
 
-func (p *MessageProcessor) processTipSet(ctx context.Context, node lens.API, ts *types.TipSet) error {
+func (p *MessageProcessor) ProcessTipSet(ctx context.Context, node lens.API, ts *types.TipSet) (*messagemodel.MessageTaskResult, error) {
+	blkMsgs, err := p.fetchMessages(ctx, node, ts)
+	if err != nil {
+		return nil, xerrors.Errorf("fetch messages: %w", err)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	rcts, err := p.fetchReceipts(ctx, node, ts)
+	if err != nil {
+		return nil, xerrors.Errorf("fetch receipts: %w", err)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	result, _, err := p.extractMessageModels(ctx, node, ts, blkMsgs)
+	if err != nil {
+		return nil, xerrors.Errorf("extract message models: %w", err)
+	}
+	result.Receipts = rcts
+
+	return result, nil
+}
+
+func (p *MessageProcessor) processAndPersistTipSet(ctx context.Context, node lens.API, ts *types.TipSet) error {
 	ctx, span := global.Tracer("").Start(ctx, "MessageProcessor.processTipSet")
 	defer span.End()
 

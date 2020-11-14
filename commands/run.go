@@ -280,9 +280,11 @@ var Run = &cli.Command{
 
 		// Add one indexing task to follow the chain head
 		if cctx.Bool("indexhead") {
+			blockIndexer := indexer.NewTipSetBlockIndexer(rctx.db)
+
 			scheduler.Add(schedule.TaskConfig{
 				Name:                "ChainHeadIndexer",
-				Task:                indexer.NewChainHeadIndexer(rctx.db, rctx.opener, cctx.Int("indexhead-confidence")),
+				Task:                indexer.NewChainHeadIndexer(blockIndexer, rctx.opener, cctx.Int("indexhead-confidence")),
 				Locker:              NewGlobalSingleton(ChainHeadIndexerLockID, rctx.db), // only want one forward indexer anywhere to be running
 				RestartOnFailure:    false,
 				RestartOnCompletion: false,
@@ -292,9 +294,10 @@ var Run = &cli.Command{
 
 		// Add one indexing task to walk the chain history
 		if cctx.Bool("indexhistory") {
+			blockIndexer := indexer.NewTipSetBlockIndexer(rctx.db)
 			scheduler.Add(schedule.TaskConfig{
 				Name:                "ChainHistoryIndexer",
-				Task:                indexer.NewChainHistoryIndexer(rctx.db, rctx.opener, cctx.Int("indexhistory-batch"), heightFrom, heightTo),
+				Task:                indexer.NewChainHistoryIndexer(blockIndexer, rctx.opener, heightFrom, heightTo),
 				Locker:              NewGlobalSingleton(ChainHistoryIndexerLockID, rctx.db), // only want one history indexer anywhere to be running
 				RestartOnFailure:    false,
 				RestartOnCompletion: false,
