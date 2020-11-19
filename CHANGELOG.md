@@ -5,6 +5,32 @@ The format is a variant of [Keep a Changelog](https://keepachangelog.com/en/1.0.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Breaking changes should trigger an increment to the major version. Features increment the minor version and fixes or other changes increment the patch number.
 
+<a name="v0.4.0"></a>
+## [v0.4.0] - 2020-11-19
+### Feat
+- add repo-read-only flag to enable read or write on lotus repo ([#250](https://github.com/filecoin-project/sentinel-visor/issues/250))
+- allow application name to be passed in postgres connection url ([#243](https://github.com/filecoin-project/sentinel-visor/issues/243))
+- limit history indexer by height ([#234](https://github.com/filecoin-project/sentinel-visor/issues/234))
+- extract msig transaction hamt
+
+### Fix
+- Remove hack to RestartOnFailure
+- Reorder migrations after merging latest master ([#248](https://github.com/filecoin-project/sentinel-visor/issues/248))
+- multisig actor migration
+- lotus chain store is a blockstore
+- missed while closing [#201](https://github.com/filecoin-project/sentinel-visor/issues/201)
+- gracefully disconnect from postgres on exit
+- don't update go modules when running make
+- panic in multisig genesis task casting
+
+### Chore
+- Avoid ingesting binary and unused data ([#241](https://github.com/filecoin-project/sentinel-visor/issues/241))
+- remove unused tables and views
+
+### Polish
+- Avoid duplicate work when reading receipts
+- use new init actor diffing logic
+
 <a name="v0.3.0"></a>
 ## [v0.3.0] - 2020-11-03
 ### Feat
@@ -158,5 +184,6 @@ After this change:
 ### Test
 - **storage:** add test to check for duplicate schema migrations ([#80](https://github.com/filecoin-project/sentinel-visor/issues/80))
 
+[v0.4.0]: https://github.com/filecoin-project/sentinel-visor/compare/v0.3.0...v0.4.0-rc1
 [v0.3.0]: https://github.com/filecoin-project/sentinel-visor/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/filecoin-project/sentinel-visor/compare/b7044af...v0.2.0
