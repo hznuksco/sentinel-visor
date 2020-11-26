@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/filecoin-project/lotus/chain/types"
@@ -113,11 +114,15 @@ type PersistableWithTxList []model.PersistableWithTx
 var _ model.PersistableWithTx = (PersistableWithTxList)(nil)
 
 func (pl PersistableWithTxList) PersistWithTx(ctx context.Context, tx *pg.Tx) error {
-	for _, p := range pl {
+	log.Debugw("PersistableWithTxList.PersistWithTx", "count", len(pl))
+	for i, p := range pl {
 		if p == nil {
+			log.Debugw("PersistableWithTxList.PersistWithTx encountered nil item", "index", i)
 			continue
 		}
+		log.Debugw("PersistableWithTxList.PersistWithTx persisting item", "index", i, "type", fmt.Sprintf("%T", p))
 		if err := p.PersistWithTx(ctx, tx); err != nil {
+			log.Debugw("PersistableWithTxList.PersistWithTx persistence failed", "index", i, "type", fmt.Sprintf("%T", p), "error", err)
 			return err
 		}
 	}
