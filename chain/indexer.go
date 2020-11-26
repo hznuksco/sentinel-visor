@@ -83,6 +83,7 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 
 	// TODO: persist all returned data asynch
 
+	log.Debugw("tipset data extracted", "time", time.Since(start))
 	if err := t.storage.Persist(ctx, data); err != nil {
 		log.Errorw("persistence failed", "error", err)
 	}

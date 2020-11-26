@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/sentinel-visor/model"
+	commonmodel "github.com/filecoin-project/sentinel-visor/model/actors/common"
 	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 )
 
@@ -117,6 +119,7 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 		idx := idx // ensure local variable
 		grp.Go(func() error {
 			start := time.Now()
+			lla.Debugw("parsing actor", "idx", idx, "actor", info.Actor, "address", info.Address, "height", info.Epoch, "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
 
 			// TODO: we have the state trees, can we optimize actor state extraction further?
 
@@ -133,7 +136,7 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 				return xerrors.Errorf("extract actor state: %w", err)
 			}
 
-			lla.Debugw("parsed actor change", "time", time.Since(start))
+			lla.Debugw("parsed actor change", "time", time.Since(start), "idx", idx)
 			rawResults[idx] = raw
 			parsedResults[idx] = parsed
 			return nil
@@ -143,6 +146,23 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 
 	if err := grp.Wait(); err != nil {
 		return nil, err
+	}
+
+	for i, r := range rawResults {
+		if r == nil {
+			ll.Errorw("missing raw actor state", "idx", i)
+			continue
+		}
+
+		atr, ok := r.(*commonmodel.ActorTaskResult)
+		if !ok {
+			ll.Errorw(fmt.Sprintf("expected *commonmodel.ActorTaskResult but got %T", r), "idx", i)
+			continue
+		}
+
+		ll.Debugw(fmt.Sprintf("raw actor data: %+v", atr.Actor), "idx", idx)
+		ll.Debugw(fmt.Sprintf("parsed actor data: %+v", atr.State), "idx", idx)
+
 	}
 
 	return PersistableWithTxList{
