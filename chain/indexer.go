@@ -2,7 +2,6 @@ package chain
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/filecoin-project/lotus/chain/types"
@@ -69,8 +68,6 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 		go t.runProcessor(ctx, p, name, ts, results)
 	}
 
-	data := make(PersistableWithTxList, 0, len(t.processors))
-
 	ll := log.With("height", int64(ts.Height()))
 
 	// Gather results
@@ -106,16 +103,13 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 		ll.Infow("task report", "task", res.Task, "status", res.Report.Status, "time", res.Report.CompletedAt.Sub(res.Report.StartedAt))
 
 		// Persist the processing report and the data
-		data = append(data, PersistableWithTxList{res.Report, res.Data})
+		if err := t.storage.Persist(ctx, PersistableWithTxList{res.Report, res.Data}); err != nil {
+			ll.Errorw("persistence failed", "error", err)
+		}
+		log.Debugw("task data persisted", "time", time.Since(start))
 	}
 
 	// TODO: persist all returned data asynch
-
-	log.Debugw("tipset data extracted", "time", time.Since(start))
-	if err := t.storage.Persist(ctx, data); err != nil {
-		log.Errorw("persistence failed", "error", err)
-	}
-
 	log.Debugw("tipset complete", "total_time", time.Since(start))
 
 	return nil
@@ -142,15 +136,11 @@ type PersistableWithTxList []model.PersistableWithTx
 var _ model.PersistableWithTx = (PersistableWithTxList)(nil)
 
 func (pl PersistableWithTxList) PersistWithTx(ctx context.Context, tx *pg.Tx) error {
-	log.Debugw("PersistableWithTxList.PersistWithTx", "count", len(pl))
-	for i, p := range pl {
+	for _, p := range pl {
 		if p == nil {
-			log.Debugw("PersistableWithTxList.PersistWithTx encountered nil item", "index", i)
 			continue
 		}
-		log.Debugw("PersistableWithTxList.PersistWithTx persisting item", "index", i, "type", fmt.Sprintf("%T", p))
 		if err := p.PersistWithTx(ctx, tx); err != nil {
-			log.Debugw("PersistableWithTxList.PersistWithTx persistence failed", "index", i, "type", fmt.Sprintf("%T", p), "error", err)
 			return err
 		}
 	}

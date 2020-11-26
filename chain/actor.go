@@ -119,12 +119,6 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 		elapsed := time.Since(start)
 		lla := log.With("height", int64(ts.Height()), "actor", actorstate.ActorNameByCode(res.Code), "address", res.Address)
 
-		if res.Skipped {
-			lla.Debugw("skipped unsupported actor")
-			skippedActors++
-			continue
-		}
-
 		if res.Error != nil {
 			lla.Errorw("actor returned with error", "error", res.Error.Error())
 			errorsDetected = append(errorsDetected, &ActorStateError{
@@ -136,12 +130,17 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			continue
 		}
 
+		if res.Skipped {
+			lla.Debugw("skipped actor without extracter")
+			skippedActors++
+		}
+
 		lla.Debugw("actor returned with data", "time", elapsed)
 		data = append(data, res.Data)
 	}
 
 	if skippedActors > 0 {
-		report.StatusInformation = fmt.Sprintf("%d unsupported actors were skipped", skippedActors)
+		report.StatusInformation = fmt.Sprintf("no extracter available for %d actors", skippedActors)
 	}
 
 	if len(errorsDetected) != 0 {
@@ -160,12 +159,6 @@ func (p *ActorStateProcessor) runActorStateExtraction(ctx context.Context, ts *t
 	defer func() {
 		results <- res
 	}()
-
-	extracter, ok := actorstate.GetActorStateExtractor(act.Code)
-	if !ok {
-		res.Skipped = true
-		return
-	}
 
 	addr, err := address.NewFromString(addrStr)
 	if err != nil {
@@ -189,6 +182,13 @@ func (p *ActorStateProcessor) runActorStateExtraction(ctx context.Context, ts *t
 	raw, err := ae.Extract(ctx, info, p.node)
 	if err != nil {
 		res.Error = xerrors.Errorf("failed to extract raw actor state: %w", err)
+		return
+	}
+
+	extracter, ok := actorstate.GetActorStateExtractor(act.Code)
+	if !ok {
+		res.Skipped = true
+		res.Data = raw // make sure the raw data is still persisted
 		return
 	}
 
