@@ -13,6 +13,7 @@ import (
 
 	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/sentinel-visor/model"
+	visormodel "github.com/filecoin-project/sentinel-visor/model/visor"
 	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 	"github.com/filecoin-project/sentinel-visor/tasks/indexer"
 )
@@ -39,23 +40,27 @@ func NewTipSetIndexer(o lens.APIOpener, d Storage, window time.Duration, actorCo
 	return &TipSetIndexer{
 		storage: d,
 		processors: map[string]TipSetProcessor{
-			"blocks":     NewBlockProcessor(),
-			"messages":   NewMessageProcessor(o), // does gas outputs too
-			"actorstate": NewActorStateProcessor(o, asp),
-			"economics":  NewChainEconomicsProcessor(o),
+			BlocksTask:         NewBlockProcessor(),
+			MessagesTask:       NewMessageProcessor(o), // does gas outputs too
+			ActorStateTask:     NewActorStateProcessor(o, asp),
+			ChainEconomicsTask: NewChainEconomicsProcessor(o),
 		},
 		window: window,
 	}, nil
 }
 
 func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
+	var cancel func()
 	if t.window > 0 {
 		// Do as much indexing as possible in the specified time window (usually one epoch when following head of chain)
 		// Anything not completed in that time will be marked as incomplete
-		var cancel func()
 		ctx, cancel = context.WithTimeout(ctx, t.window)
-		defer cancel()
+	} else {
+		// Ensure all goroutines are stopped when we exit
+		ctx, cancel = context.WithCancel(ctx)
 	}
+	defer cancel()
+
 	start := time.Now()
 
 	// Run each task concurrently
@@ -66,20 +71,43 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 
 	data := make(PersistableWithTxList, 0, len(t.processors))
 
+	ll := log.With("height", int64(ts.Height()))
+
 	// Gather results
 	inFlight := len(t.processors)
 	for inFlight > 0 {
 		res := <-results
 		inFlight--
-		elapsed := time.Since(start)
 
+		// Was there a fatal error?
 		if res.Error != nil {
-			log.Errorw("task returned with error", "task", res.Task, "error", res.Error.Error(), "time", elapsed)
+			ll.Errorw("task returned with error", "task", res.Task, "error", res.Error.Error())
+			return res.Error
+		}
+
+		if res.Report == nil {
+			// Nothing was done for this tipset
+			ll.Debugw("task returned with no report", "task", res.Task)
 			continue
 		}
 
-		log.Debugw("task returned with data", "task", res.Task, "time", elapsed)
-		data = append(data, res.Data)
+		// Fill in some report metadata
+		res.Report.StartedAt = start
+		res.Report.CompletedAt = time.Now()
+
+		if res.Report.ErrorsDetected != nil {
+			res.Report.Status = visormodel.ProcessingStatusError
+		} else if res.Report.StatusInformation != "" {
+			res.Report.Status = visormodel.ProcessingStatusInfo
+		} else {
+			res.Report.Status = visormodel.ProcessingStatusOK
+		}
+
+		ll.Debugw("task report", "task", res.Task, "time", res.Report.CompletedAt.Sub(res.Report.StartedAt))
+		data = append(data, PersistableWithTxList{
+			res.Data,
+			res.Report,
+		})
 	}
 
 	// TODO: persist all returned data asynch
@@ -95,7 +123,7 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 }
 
 func (t *TipSetIndexer) runProcessor(ctx context.Context, p TipSetProcessor, name string, ts *types.TipSet, results chan *TaskResult) {
-	data, err := p.ProcessTipSet(ctx, ts)
+	data, report, err := p.ProcessTipSet(ctx, ts)
 	if err != nil {
 		results <- &TaskResult{
 			Task:  name,
@@ -104,8 +132,9 @@ func (t *TipSetIndexer) runProcessor(ctx context.Context, p TipSetProcessor, nam
 		return
 	}
 	results <- &TaskResult{
-		Task: name,
-		Data: data,
+		Task:   name,
+		Report: report,
+		Data:   data,
 	}
 }
 
@@ -129,14 +158,18 @@ func (pl PersistableWithTxList) PersistWithTx(ctx context.Context, tx *pg.Tx) er
 	return nil
 }
 
-// A TaskResult is either some data to persist or an error which indicates that the task did not complete
+// A TaskResult is either some data to persist or an error which indicates that the task did not complete. Partial
+// completions are possible provided the Data contains a persistable log of the results.
 type TaskResult struct {
-	Task  string
-	Error error
-	Data  model.PersistableWithTx
+	Task   string
+	Error  error
+	Report *visormodel.ProcessingReport
+	Data   model.PersistableWithTx
 }
 
 type TipSetProcessor interface {
-	ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, error)
+	// ProcessTipSet processes a tipset. If error is non-nil then the processor encountered a fatal error.
+	// Any data returned must be accompanied by a processing report.
+	ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, *visormodel.ProcessingReport, error)
 	Close() error
 }

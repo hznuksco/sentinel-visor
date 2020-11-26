@@ -15,11 +15,12 @@ import (
 	"github.com/filecoin-project/sentinel-visor/model"
 	derivedmodel "github.com/filecoin-project/sentinel-visor/model/derived"
 	messagemodel "github.com/filecoin-project/sentinel-visor/model/messages"
-	"github.com/filecoin-project/sentinel-visor/tasks/message"
+	visormodel "github.com/filecoin-project/sentinel-visor/model/visor"
 )
 
+const MessagesTask = "messages"
+
 type MessageProcessor struct {
-	mp         *message.MessageProcessor
 	node       lens.API
 	opener     lens.APIOpener
 	closer     lens.APICloser
@@ -28,34 +29,31 @@ type MessageProcessor struct {
 
 func NewMessageProcessor(opener lens.APIOpener) *MessageProcessor {
 	return &MessageProcessor{
-		// TODO: remove the hackiness of having to create a mostly unused processor
-		mp:     message.NewMessageProcessor(nil, nil, 0, 0, true, 0, 0),
 		opener: opener,
 	}
 }
 
-func (p *MessageProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, error) {
+func (p *MessageProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, *visormodel.ProcessingReport, error) {
 	if p.node == nil {
 		node, closer, err := p.opener.Open(ctx)
 		if err != nil {
-			return nil, xerrors.Errorf("unable to open lens: %w", err)
+			return nil, nil, xerrors.Errorf("unable to open lens: %w", err)
 		}
 		p.node = node
 		p.closer = closer
 	}
 
-	msgResult, err := p.mp.ProcessTipSet(ctx, p.node, ts)
-	if err != nil {
-		return nil, xerrors.Errorf("process tipset: %w", err)
-	}
+	var data model.PersistableWithTx
+	var report *visormodel.ProcessingReport
+	var err error
 
 	if p.lastTipSet != nil {
 		if p.lastTipSet.Height() > ts.Height() {
 			// last tipset seen was the child
-			p.processExecutedMessages(ctx, p.lastTipSet, ts)
+			data, report, err = p.processExecutedMessages(ctx, p.lastTipSet, ts)
 		} else if p.lastTipSet.Height() < ts.Height() {
 			// last tipset seen was the parent
-			p.processExecutedMessages(ctx, ts, p.lastTipSet)
+			data, report, err = p.processExecutedMessages(ctx, ts, p.lastTipSet)
 		} else {
 			// TODO: record in database that we were unable to process messages for this tipset
 			log.Errorw("out of order tipsets", "height", ts.Height(), "last_height", p.lastTipSet.Height())
@@ -65,14 +63,21 @@ func (p *MessageProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) 
 	p.lastTipSet = ts
 
 	// TODO: close lens if rpc error
-	return msgResult, nil
+	return data, report, err
 }
 
 // Note that all this processing is in the context of the parent tipset. The child is only used for receipts
-func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts *types.TipSet) (model.PersistableWithTx, error) {
+func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts *types.TipSet) (model.PersistableWithTx, *visormodel.ProcessingReport, error) {
+	report := &visormodel.ProcessingReport{
+		Height:    int64(ts.Height()),
+		Task:      ActorStateTask,
+		StateRoot: pts.ParentState().String(),
+	}
+
 	emsgs, err := p.node.GetExecutedMessageForTipset(ctx, ts, pts)
 	if err != nil {
-		return nil, xerrors.Errorf("process executed messages: %w", err)
+		report.ErrorsDetected = xerrors.Errorf("failed to get executed messages: %w", err)
+		return nil, report, nil
 	}
 
 	var (
@@ -80,6 +85,7 @@ func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts 
 		blockMessageResults  = make(messagemodel.BlockMessages, 0, len(emsgs))
 		parsedMessageResults = make(messagemodel.ParsedMessages, 0, len(emsgs))
 		gasOutputsResults    = make(derivedmodel.GasOutputsList, 0, len(emsgs))
+		errorsDetected       = make([]*MessageError, 0, len(emsgs))
 	)
 
 	var (
@@ -90,10 +96,10 @@ func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts 
 	)
 
 	for _, m := range emsgs {
-		// Stop processing if we have passed the deadline
+		// Stop processing if we have been told to cancel
 		select {
 		case <-ctx.Done():
-			return nil, xerrors.Errorf("context done: %w", ctx.Err())
+			return nil, nil, xerrors.Errorf("context done: %w", ctx.Err())
 		default:
 		}
 
@@ -116,8 +122,10 @@ func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts 
 		if b, err := m.Msg.Serialize(); err == nil {
 			msgSize = len(b)
 		} else {
-			// TODO: decide whether to fail entire tipset or just this messaged
-			return nil, xerrors.Errorf("serialize message: %w", err)
+			errorsDetected = append(errorsDetected, &MessageError{
+				Cid:   m.Cid,
+				Error: xerrors.Errorf("failed to serialize message: %w", err).Error(),
+			})
 		}
 
 		// record all unique messages
@@ -187,13 +195,17 @@ func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts 
 		GasWasteRatio:       float64(totalGasLimit-totalUniqGasLimit) / float64(len(ts.Blocks())*build.BlockGasTarget),
 	}
 
+	if len(errorsDetected) != 0 {
+		report.ErrorsDetected = errorsDetected
+	}
+
 	return PersistableWithTxList{
 		messageResults,
 		blockMessageResults,
 		parsedMessageResults,
 		gasOutputsResults,
 		messageGasEconomyResult,
-	}, nil
+	}, report, nil
 }
 
 func (p *MessageProcessor) Close() error {
@@ -201,4 +213,9 @@ func (p *MessageProcessor) Close() error {
 		p.closer()
 	}
 	return nil
+}
+
+type MessageError struct {
+	Cid   cid.Cid
+	Error string
 }

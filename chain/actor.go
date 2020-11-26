@@ -8,13 +8,16 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/lotus/chain/state"
 	"github.com/filecoin-project/lotus/chain/types"
-	"golang.org/x/sync/errgroup"
+	"github.com/ipfs/go-cid"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/sentinel-visor/model"
+	visormodel "github.com/filecoin-project/sentinel-visor/model/visor"
 	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 )
+
+const ActorStateTask = "actorstate"
 
 type ActorStateProcessor struct {
 	asp           *actorstate.ActorStateProcessor
@@ -32,31 +35,32 @@ func NewActorStateProcessor(opener lens.APIOpener, asp *actorstate.ActorStatePro
 	}
 }
 
-func (p *ActorStateProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, error) {
+func (p *ActorStateProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) (model.PersistableWithTx, *visormodel.ProcessingReport, error) {
 	if p.node == nil {
 		node, closer, err := p.opener.Open(ctx)
 		if err != nil {
-			return nil, xerrors.Errorf("unable to open lens: %w", err)
+			return nil, nil, xerrors.Errorf("unable to open lens: %w", err)
 		}
 		p.node = node
 		p.closer = closer
 	}
 
-	var result model.PersistableWithTx
+	var data model.PersistableWithTx
+	var report *visormodel.ProcessingReport
 	var err error
 
 	stateTree, err := state.LoadStateTree(p.node.Store(), ts.ParentState())
 	if err != nil {
-		return nil, xerrors.Errorf("failed to load state tree: %w", err)
+		return nil, nil, xerrors.Errorf("failed to load state tree: %w", err)
 	}
 
 	if p.lastTipSet != nil && p.lastStateTree != nil {
 		if p.lastTipSet.Height() > ts.Height() {
 			// last tipset seen was the child
-			result, err = p.processStateChanges(ctx, p.lastTipSet, ts, p.lastStateTree, stateTree)
+			data, report, err = p.processStateChanges(ctx, p.lastTipSet, ts, p.lastStateTree, stateTree)
 		} else if p.lastTipSet.Height() < ts.Height() {
 			// last tipset seen was the parent
-			result, err = p.processStateChanges(ctx, ts, p.lastTipSet, stateTree, p.lastStateTree)
+			data, report, err = p.processStateChanges(ctx, ts, p.lastTipSet, stateTree, p.lastStateTree)
 		} else {
 			// TODO: record in database that we were unable to process actors for this tipset
 			log.Errorw("out of order tipsets", "height", ts.Height(), "last_height", p.lastTipSet.Height())
@@ -67,94 +71,135 @@ func (p *ActorStateProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSe
 	p.lastStateTree = stateTree
 
 	// TODO: close lens if rpc error
-	return result, err
+	return data, report, err
 }
 
-func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types.TipSet, pts *types.TipSet, stateTree *state.StateTree, parentStateTree *state.StateTree) (model.PersistableWithTx, error) {
+func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types.TipSet, pts *types.TipSet, stateTree *state.StateTree, parentStateTree *state.StateTree) (model.PersistableWithTx, *visormodel.ProcessingReport, error) {
 	log.Debugw("processing state changes", "height", ts.Height(), "parent_height", pts.Height())
+
+	report := &visormodel.ProcessingReport{
+		Height:    int64(ts.Height()),
+		Task:      ActorStateTask,
+		StateRoot: pts.ParentState().String(),
+		Status:    visormodel.ProcessingStatusOK,
+	}
+
 	if !types.CidArrsEqual(ts.Parents().Cids(), pts.Cids()) {
-		return nil, xerrors.Errorf("child is not on the same chain")
+		report.ErrorsDetected = xerrors.Errorf("child is not on the same chain")
+		return nil, report, nil
 	}
 
 	changes, err := state.Diff(parentStateTree, stateTree)
 	if err != nil {
-		return nil, xerrors.Errorf("get actor changes: %w", err)
+		report.ErrorsDetected = xerrors.Errorf("failed to diff state trees: %w", err)
+		return nil, report, nil
 	}
 
 	ll := log.With("height", int64(ts.Height()))
 
 	ll.Debugw("found actor state changes", "count", len(changes))
 
-	rawResults := make(PersistableWithTxList, len(changes))
-	parsedResults := make(PersistableWithTxList, len(changes))
+	start := time.Now()
 
-	grp, ctx := errgroup.WithContext(ctx)
+	// Run each task concurrently
+	results := make(chan *ActorStateResult, len(changes))
+	for addr, act := range changes {
+		go p.runActorStateExtraction(ctx, ts, pts, addr, act, results)
+	}
 
-	changeIndex := 0
-	for str, act := range changes {
-		idx := changeIndex // local copy of variable to avoid goroutines sharing same reference
-		lla := ll.With("address", str, "code", actorstate.ActorNameByCode(act.Code), "height", ts.Height(), "idx", idx)
-		lla.Debugw("found actor change")
+	data := make(PersistableWithTxList, 0, len(changes))
+	errorsDetected := make([]*ActorStateError, 0, len(changes))
+	skippedActors := 0
 
-		extracter, ok := actorstate.GetActorStateExtractor(act.Code)
-		if !ok {
-			lla.Debugw("skipping change for unsupported actor")
+	// Gather results
+	inFlight := len(changes)
+	for inFlight > 0 {
+		res := <-results
+		inFlight--
+		elapsed := time.Since(start)
+		lla := log.With("height", int64(ts.Height()), "actor", actorstate.ActorNameByCode(res.Code), "address", res.Address)
+
+		if res.Skipped {
+			lla.Debugw("skipped unsupported actor")
+			skippedActors++
 			continue
 		}
 
-		addr, err := address.NewFromString(str)
-		if err != nil {
-			return nil, xerrors.Errorf("parse address: %w", err)
+		if res.Error != nil {
+			lla.Errorw("actor returned with error", "error", res.Error.Error())
+			errorsDetected = append(errorsDetected, &ActorStateError{
+				Code:    res.Code,
+				Head:    res.Head,
+				Address: res.Address,
+				Error:   res.Error.Error(),
+			})
+			continue
 		}
 
-		info := actorstate.ActorInfo{
-			Actor:           act,
-			Address:         addr,
-			ParentStateRoot: pts.ParentState(),
-			Epoch:           ts.Height(),
-			TipSet:          pts.Key(),
-			ParentTipSet:    pts.Parents(),
-		}
-
-		grp.Go(func() error {
-			start := time.Now()
-			lla.Debugw("parsing actor", "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
-
-			// TODO: we have the state trees, can we optimize actor state extraction further?
-
-			// Extract raw state
-			var ae actorstate.ActorExtractor
-			raw, err := ae.Extract(ctx, info, p.node)
-			lla.Debugw("extracted raw actor state", "raw", fmt.Sprintf("%+v", raw), "error", err)
-			if err != nil {
-				return xerrors.Errorf("extract raw actor state: %w", err)
-			}
-
-			// Parse state
-			parsed, err := extracter.Extract(ctx, info, p.node)
-			lla.Debugw("extracted parsed actor state", "parsed", fmt.Sprintf("%+v", parsed), "error", err)
-			if err != nil {
-				return xerrors.Errorf("extract actor state: %w", err)
-			}
-
-			lla.Debugw("parsed actor change", "time", time.Since(start))
-			rawResults[idx] = raw
-			parsedResults[idx] = parsed
-			return nil
-		})
-
-		changeIndex++
-
+		lla.Debugw("actor returned with data", "time", elapsed)
+		data = append(data, res.Data)
 	}
 
-	if err := grp.Wait(); err != nil {
-		return nil, err
+	if skippedActors > 0 {
+		report.StatusInformation = fmt.Sprintf("%d unsupported actors were skipped", skippedActors)
 	}
 
-	return PersistableWithTxList{
-		rawResults,
-		parsedResults,
-	}, nil
+	if len(errorsDetected) != 0 {
+		report.ErrorsDetected = errorsDetected
+	}
+
+	return data, report, nil
+}
+
+func (p *ActorStateProcessor) runActorStateExtraction(ctx context.Context, ts *types.TipSet, pts *types.TipSet, addrStr string, act types.Actor, results chan *ActorStateResult) {
+	res := &ActorStateResult{
+		Code:    act.Code,
+		Head:    act.Head,
+		Address: addrStr,
+	}
+	defer func() {
+		results <- res
+	}()
+
+	extracter, ok := actorstate.GetActorStateExtractor(act.Code)
+	if !ok {
+		res.Skipped = true
+		return
+	}
+
+	addr, err := address.NewFromString(addrStr)
+	if err != nil {
+		res.Error = xerrors.Errorf("failed to parse address: %w", err)
+		return
+	}
+
+	info := actorstate.ActorInfo{
+		Actor:           act,
+		Address:         addr,
+		ParentStateRoot: pts.ParentState(),
+		Epoch:           ts.Height(),
+		TipSet:          pts.Key(),
+		ParentTipSet:    pts.Parents(),
+	}
+
+	// TODO: we have the state trees available, can we optimize actor state extraction further?
+
+	// Extract raw state
+	var ae actorstate.ActorExtractor
+	raw, err := ae.Extract(ctx, info, p.node)
+	if err != nil {
+		res.Error = xerrors.Errorf("failed to extract raw actor state: %w", err)
+		return
+	}
+
+	// Parse state
+	parsed, err := extracter.Extract(ctx, info, p.node)
+	if err != nil {
+		res.Error = xerrors.Errorf("failed to extract parsed actor state: %w", err)
+		return
+	}
+
+	res.Data = PersistableWithTxList{raw, parsed}
 }
 
 func (p *ActorStateProcessor) Close() error {
@@ -162,4 +207,20 @@ func (p *ActorStateProcessor) Close() error {
 		p.closer()
 	}
 	return nil
+}
+
+type ActorStateResult struct {
+	Code    cid.Cid
+	Head    cid.Cid
+	Address string
+	Error   error
+	Skipped bool
+	Data    model.PersistableWithTx
+}
+
+type ActorStateError struct {
+	Code    cid.Cid
+	Head    cid.Cid
+	Address string
+	Error   string
 }
