@@ -42,7 +42,7 @@ func (m StorageMinerExtractor) Extract(ctx context.Context, a ActorInfo, node Ac
 
 	ec, err := NewMinerStateExtractionContext(ctx, a, node)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("creating miner state extraction context: %w", err)
 	}
 
 	minerInfoModel, err := ExtractMinerInfo(a, ec)
@@ -109,7 +109,7 @@ func NewMinerStateExtractionContext(ctx context.Context, a ActorInfo, node Actor
 	if a.Epoch != 0 {
 		prevActor, err := node.StateGetActor(ctx, a.Address, a.ParentTipSet)
 		if err != nil {
-			return nil, xerrors.Errorf("loading previous miner %s at tipset %s epoch %d: %w", a.Address, a.ParentTipSet, a.Epoch)
+			return nil, xerrors.Errorf("loading previous miner %s at tipset %s epoch %d: %w", a.Address, a.ParentTipSet, a.Epoch, err)
 		}
 
 		prevState, err = miner.Load(node.Store(), prevActor)
