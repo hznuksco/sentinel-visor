@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -91,7 +92,8 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 
 	changeIndex := 0
 	for str, act := range changes {
-		lla := ll.With("addr", str, "code", actorstate.ActorNameByCode(act.Code))
+		idx := changeIndex // local copy of variable to avoid goroutines sharing same reference
+		lla := ll.With("address", str, "code", actorstate.ActorNameByCode(act.Code), "height", ts.Height(), "idx", idx)
 		lla.Debugw("found actor change")
 
 		extracter, ok := actorstate.GetActorStateExtractor(act.Code)
@@ -114,27 +116,28 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			ParentTipSet:    pts.Parents(),
 		}
 
-		idx := changeIndex // local copy of variable to avoid goroutines sharing same reference
 		grp.Go(func() error {
 			start := time.Now()
-			lla.Debugw("parsing actor", "idx", idx, "actor", info.Actor, "address", info.Address, "height", info.Epoch, "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
+			lla.Debugw("parsing actor", "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
 
 			// TODO: we have the state trees, can we optimize actor state extraction further?
 
 			// Extract raw state
 			var ae actorstate.ActorExtractor
 			raw, err := ae.Extract(ctx, info, p.node)
+			lla.Debugw("extracted raw actor state", "raw", fmt.Sprintf("%+v", raw), "error", err)
 			if err != nil {
 				return xerrors.Errorf("extract raw actor state: %w", err)
 			}
 
 			// Parse state
 			parsed, err := extracter.Extract(ctx, info, p.node)
+			lla.Debugw("extracted parsed actor state", "parsed", fmt.Sprintf("%+v", parsed), "error", err)
 			if err != nil {
 				return xerrors.Errorf("extract actor state: %w", err)
 			}
 
-			lla.Debugw("parsed actor change", "time", time.Since(start), "idx", idx)
+			lla.Debugw("parsed actor change", "time", time.Since(start))
 			rawResults[idx] = raw
 			parsedResults[idx] = parsed
 			return nil
