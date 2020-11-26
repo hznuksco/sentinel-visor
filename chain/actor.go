@@ -2,7 +2,6 @@ package chain
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/sentinel-visor/model"
-	commonmodel "github.com/filecoin-project/sentinel-visor/model/actors/common"
 	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 )
 
@@ -91,7 +89,7 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 
 	grp, ctx := errgroup.WithContext(ctx)
 
-	idx := 0
+	changeIndex := 0
 	for str, act := range changes {
 		lla := ll.With("addr", str, "code", actorstate.ActorNameByCode(act.Code))
 		lla.Debugw("found actor change")
@@ -116,6 +114,7 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			ParentTipSet:    pts.Parents(),
 		}
 
+		idx := changeIndex // local copy of variable to avoid goroutines sharing same reference
 		grp.Go(func() error {
 			start := time.Now()
 			lla.Debugw("parsing actor", "idx", idx, "actor", info.Actor, "address", info.Address, "height", info.Epoch, "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
@@ -141,29 +140,12 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			return nil
 		})
 
-		idx++
+		changeIndex++
 
 	}
 
 	if err := grp.Wait(); err != nil {
 		return nil, err
-	}
-
-	for i, r := range rawResults {
-		if r == nil {
-			ll.Errorw("missing raw actor state", "idx", i)
-			continue
-		}
-
-		atr, ok := r.(*commonmodel.ActorTaskResult)
-		if !ok {
-			ll.Errorw(fmt.Sprintf("expected *commonmodel.ActorTaskResult but got %T", r), "idx", i)
-			continue
-		}
-
-		ll.Debugw(fmt.Sprintf("raw actor data: %+v", atr.Actor), "idx", idx)
-		ll.Debugw(fmt.Sprintf("parsed actor data: %+v", atr.State), "idx", idx)
-
 	}
 
 	return PersistableWithTxList{
