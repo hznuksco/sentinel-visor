@@ -11,13 +11,14 @@ func init() {
 CREATE TABLE IF NOT EXISTS public.visor_processing_reports (
 	"height" bigint,
 	"state_root" text,
+	"reporter" text,
 	"task" text,
 	"started_at" timestamptz NOT NULL,
 	"completed_at" timestamptz NOT NULL,
 	"status" text,
 	"status_information" text,
 	"errors_detected" jsonb,
-	PRIMARY KEY ("height","state_root","task","started_at")
+	PRIMARY KEY ("height","state_root","reporter", "task","started_at")
 );
 `)
 

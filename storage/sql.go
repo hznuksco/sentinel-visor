@@ -28,7 +28,6 @@ import (
 	"github.com/filecoin-project/sentinel-visor/model/derived"
 	"github.com/filecoin-project/sentinel-visor/model/messages"
 	"github.com/filecoin-project/sentinel-visor/model/visor"
-	"github.com/filecoin-project/sentinel-visor/version"
 )
 
 var models = []interface{}{
@@ -86,14 +85,14 @@ var (
 	ErrSchemaTooNew = errors.New("database schema is too new for this version of visor")
 )
 
-func NewDatabase(ctx context.Context, url string, poolSize int) (*Database, error) {
+func NewDatabase(ctx context.Context, url string, poolSize int, name string) (*Database, error) {
 	opt, err := pg.ParseURL(url)
 	if err != nil {
 		return nil, xerrors.Errorf("parse database URL: %w", err)
 	}
 	opt.PoolSize = poolSize
 	if opt.ApplicationName == "" {
-		opt.ApplicationName = "visor-" + version.String()
+		opt.ApplicationName = name
 	}
 
 	return &Database{

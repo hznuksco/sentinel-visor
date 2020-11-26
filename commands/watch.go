@@ -27,11 +27,6 @@ var Watch = &cli.Command{
 			Value:   2,
 			EnvVars: []string{"VISOR_INDEXHEAD_CONFIDENCE"},
 		},
-		&cli.BoolFlag{
-			Name:   "nopersist",
-			Usage:  "Disable persistence of data to postgres",
-			Hidden: true,
-		},
 	},
 	Action: watch,
 }
@@ -59,11 +54,6 @@ func watch(cctx *cli.Context) error {
 		lensCloser()
 	}()
 
-	actorCodes, err := getActorCodes(cctx)
-	if err != nil {
-		return err
-	}
-
 	var storage chain.Storage = &chain.NullStorage{}
 	if cctx.String("db") == "" {
 		log.Warnw("database not specified, data will not be persisted")
@@ -90,7 +80,7 @@ func watch(cctx *cli.Context) error {
 		}
 	}()
 
-	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, builtin.EpochDurationSeconds*time.Second, actorCodes)
+	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, builtin.EpochDurationSeconds*time.Second, getInstanceIdentifier(cctx))
 	if err != nil {
 		return xerrors.Errorf("setup indexer: %w", err)
 	}
@@ -99,6 +89,7 @@ func watch(cctx *cli.Context) error {
 	scheduler.Add(schedule.TaskConfig{
 		Name: "ChainHeadIndexer",
 		Task: indexer.NewChainHeadIndexer(tsIndexer, lensOpener, cctx.Int("indexhead-confidence")),
+		// TODO: add locker
 		// Locker:              NewGlobalSingleton(ChainHeadIndexerLockID, rctx.db), // only want one forward indexer anywhere to be running
 		RestartOnFailure:    true,
 		RestartOnCompletion: true, // we always want the indexer to be running

@@ -67,11 +67,6 @@ func walk(cctx *cli.Context) error {
 		lensCloser()
 	}()
 
-	actorCodes, err := getActorCodes(cctx)
-	if err != nil {
-		return err
-	}
-
 	var storage chain.Storage = &chain.NullStorage{}
 	if cctx.String("db") == "" {
 		log.Warnw("database not specified, data will not be persisted")
@@ -100,7 +95,7 @@ func walk(cctx *cli.Context) error {
 
 	scheduler := schedule.NewScheduler(cctx.Duration("task-delay"))
 
-	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, 0, actorCodes)
+	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, 0, getInstanceIdentifier(cctx))
 	if err != nil {
 		return xerrors.Errorf("setup indexer: %w", err)
 	}

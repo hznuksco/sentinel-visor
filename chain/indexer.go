@@ -6,14 +6,11 @@ import (
 
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/go-pg/pg/v10"
-	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
-	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/sentinel-visor/lens"
 	"github.com/filecoin-project/sentinel-visor/model"
 	visormodel "github.com/filecoin-project/sentinel-visor/model/visor"
-	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 	"github.com/filecoin-project/sentinel-visor/tasks/indexer"
 )
 
@@ -27,24 +24,20 @@ type TipSetIndexer struct {
 	opener     lens.APIOpener
 	storage    Storage
 	processors map[string]TipSetProcessor
+	name       string
 }
 
-func NewTipSetIndexer(o lens.APIOpener, d Storage, window time.Duration, actorCodes []cid.Cid) (*TipSetIndexer, error) {
-	// TODO: remove the hackiness of having to create a mostly unused processor
-	asp, err := actorstate.NewActorStateProcessor(nil, nil, 0, 0, 0, 0, actorCodes, false)
-	if err != nil {
-		return nil, xerrors.Errorf("new actor state processor: %w", err)
-	}
-
+func NewTipSetIndexer(o lens.APIOpener, d Storage, window time.Duration, name string) (*TipSetIndexer, error) {
 	return &TipSetIndexer{
 		storage: d,
 		processors: map[string]TipSetProcessor{
 			BlocksTask:         NewBlockProcessor(),
 			MessagesTask:       NewMessageProcessor(o), // does gas outputs too
-			ActorStateTask:     NewActorStateProcessor(o, asp),
+			ActorStateTask:     NewActorStateProcessor(o),
 			ChainEconomicsTask: NewChainEconomicsProcessor(o),
 		},
 		window: window,
+		name:   name,
 	}, nil
 }
 
@@ -89,6 +82,7 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 		}
 
 		// Fill in some report metadata
+		res.Report.Reporter = t.name
 		res.Report.StartedAt = start
 		res.Report.CompletedAt = time.Now()
 

@@ -23,7 +23,10 @@ type ProcessingReport struct {
 	Height    int64  `pg:",pk,use_zero"`
 	StateRoot string `pg:",pk,notnull"`
 
-	// Measure is the name of the task that was running
+	// Reporter is the name of the instance that is reporting the result
+	Reporter string `pg:",pk,notnull"`
+
+	// Task is the name of the sub task that generated the report
 	Task string `pg:",pk,notnull"`
 
 	StartedAt   time.Time `pg:",pk,use_zero"`

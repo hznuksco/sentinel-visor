@@ -20,7 +20,6 @@ import (
 const ActorStateTask = "actorstates"
 
 type ActorStateProcessor struct {
-	asp           *actorstate.ActorStateProcessor
 	node          lens.API
 	opener        lens.APIOpener
 	closer        lens.APICloser
@@ -28,9 +27,8 @@ type ActorStateProcessor struct {
 	lastStateTree *state.StateTree
 }
 
-func NewActorStateProcessor(opener lens.APIOpener, asp *actorstate.ActorStateProcessor) *ActorStateProcessor {
+func NewActorStateProcessor(opener lens.APIOpener) *ActorStateProcessor {
 	return &ActorStateProcessor{
-		asp:    asp,
 		opener: opener,
 	}
 }
@@ -62,7 +60,6 @@ func (p *ActorStateProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSe
 			// last tipset seen was the parent
 			data, report, err = p.processStateChanges(ctx, ts, p.lastTipSet, stateTree, p.lastStateTree)
 		} else {
-			// TODO: record in database that we were unable to process actors for this tipset
 			log.Errorw("out of order tipsets", "height", ts.Height(), "last_height", p.lastTipSet.Height())
 		}
 	}

@@ -55,7 +55,6 @@ func (p *MessageProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) 
 			// last tipset seen was the parent
 			data, report, err = p.processExecutedMessages(ctx, ts, p.lastTipSet)
 		} else {
-			// TODO: record in database that we were unable to process messages for this tipset
 			log.Errorw("out of order tipsets", "height", ts.Height(), "last_height", p.lastTipSet.Height())
 		}
 	}
