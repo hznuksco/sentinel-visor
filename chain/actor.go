@@ -116,7 +116,6 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			ParentTipSet:    pts.Parents(),
 		}
 
-		idx := idx // ensure local variable
 		grp.Go(func() error {
 			start := time.Now()
 			lla.Debugw("parsing actor", "idx", idx, "actor", info.Actor, "address", info.Address, "height", info.Epoch, "tipset", info.TipSet, "parent_tipset", info.ParentTipSet)
@@ -141,6 +140,8 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 			parsedResults[idx] = parsed
 			return nil
 		})
+
+		idx++
 
 	}
 
