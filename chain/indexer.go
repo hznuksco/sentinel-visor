@@ -103,11 +103,10 @@ func (t *TipSetIndexer) TipSet(ctx context.Context, ts *types.TipSet) error {
 			res.Report.Status = visormodel.ProcessingStatusOK
 		}
 
-		ll.Debugw("task report", "task", res.Task, "time", res.Report.CompletedAt.Sub(res.Report.StartedAt))
-		data = append(data, PersistableWithTxList{
-			res.Data,
-			res.Report,
-		})
+		ll.Infow("task report", "task", res.Task, "status", res.Report.Status, "time", res.Report.CompletedAt.Sub(res.Report.StartedAt))
+
+		// Persist the processing report and the data
+		data = append(data, PersistableWithTxList{res.Report, res.Data})
 	}
 
 	// TODO: persist all returned data asynch

@@ -17,7 +17,7 @@ import (
 	"github.com/filecoin-project/sentinel-visor/tasks/actorstate"
 )
 
-const ActorStateTask = "actorstate"
+const ActorStateTask = "actorstates"
 
 type ActorStateProcessor struct {
 	asp           *actorstate.ActorStateProcessor
