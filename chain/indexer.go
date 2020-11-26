@@ -99,7 +99,7 @@ func (t *TipSetIndexer) runProcessor(ctx context.Context, p TipSetProcessor, nam
 	if err != nil {
 		results <- &TaskResult{
 			Task:  name,
-			Error: ctx.Err(),
+			Error: err,
 		}
 		return
 	}
