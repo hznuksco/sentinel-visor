@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	_ "net/http/pprof"
-	"os"
 	"strings"
 	"time"
 
@@ -65,7 +64,7 @@ func setupStorageAndAPI(cctx *cli.Context) (context.Context, *RunContext, error)
 
 func setupDatabase(cctx *cli.Context) (*storage.Database, error) {
 	ctx := cctx.Context
-	db, err := storage.NewDatabase(ctx, cctx.String("db"), cctx.Int("db-pool-size"), getInstanceIdentifier(cctx))
+	db, err := storage.NewDatabase(ctx, cctx.String("db"), cctx.Int("db-pool-size"), cctx.String("name"))
 	if err != nil {
 		return nil, xerrors.Errorf("new database: %w", err)
 	}
@@ -274,17 +273,4 @@ func setupMetrics(cctx *cli.Context) error {
 		}
 	}()
 	return nil
-}
-
-func getInstanceIdentifier(cctx *cli.Context) string {
-	id := cctx.String("name")
-	if id == "" {
-		id = "visor"
-	}
-
-	hostname, err := os.Hostname()
-	if err == nil {
-		id += "-" + hostname
-	}
-	return id + "-" + version.String()
 }

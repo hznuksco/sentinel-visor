@@ -80,7 +80,7 @@ func watch(cctx *cli.Context) error {
 		}
 	}()
 
-	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, builtin.EpochDurationSeconds*time.Second, getInstanceIdentifier(cctx))
+	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, builtin.EpochDurationSeconds*time.Second, cctx.String("name"))
 	if err != nil {
 		return xerrors.Errorf("setup indexer: %w", err)
 	}

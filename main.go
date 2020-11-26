@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/urfave/cli/v2"
@@ -15,6 +16,12 @@ var log = logging.Logger("visor")
 func main() {
 	if err := logging.SetLogLevel("*", "info"); err != nil {
 		log.Fatal(err)
+	}
+
+	defaultName := "visor_" + version.String()
+	hostname, err := os.Hostname()
+	if err == nil {
+		defaultName += "_" + hostname + "_" + strconv.Itoa(os.Getpid())
 	}
 
 	app := &cli.App{
@@ -75,6 +82,12 @@ func main() {
 				EnvVars: []string{"VISOR_LOG_LEVEL_NAMED"},
 				Value:   "",
 				Usage:   "A comma delimited list of named loggers and log levels formatted as name:level, for example 'logger1:debug,logger2:info'",
+			},
+			&cli.StringFlag{
+				Name:    "name",
+				EnvVars: []string{"VISOR_NAME"},
+				Value:   defaultName,
+				Usage:   "A name that helps to identify this instance of visor.",
 			},
 			&cli.BoolFlag{
 				Name:    "tracing",

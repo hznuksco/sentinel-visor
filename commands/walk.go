@@ -95,7 +95,7 @@ func walk(cctx *cli.Context) error {
 
 	scheduler := schedule.NewScheduler(cctx.Duration("task-delay"))
 
-	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, 0, getInstanceIdentifier(cctx))
+	tsIndexer, err := chain.NewTipSetIndexer(lensOpener, storage, 0, cctx.String("name"))
 	if err != nil {
 		return xerrors.Errorf("setup indexer: %w", err)
 	}
