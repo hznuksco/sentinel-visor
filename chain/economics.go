@@ -39,8 +39,8 @@ func (p *ChainEconomicsProcessor) ProcessTipSet(ctx context.Context, ts *types.T
 
 	report := &visormodel.ProcessingReport{
 		Height:    int64(ts.Height()),
-		Task:      ChainEconomicsTask,
 		StateRoot: ts.ParentState().String(),
+		Task:      ChainEconomicsTask,
 	}
 
 	supply, err := p.node.StateVMCirculatingSupplyInternal(ctx, ts.Key())

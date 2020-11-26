@@ -69,9 +69,9 @@ func (p *MessageProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) 
 // Note that all this processing is in the context of the parent tipset. The child is only used for receipts
 func (p *MessageProcessor) processExecutedMessages(ctx context.Context, ts, pts *types.TipSet) (model.PersistableWithTx, *visormodel.ProcessingReport, error) {
 	report := &visormodel.ProcessingReport{
-		Height:    int64(ts.Height()),
-		Task:      ActorStateTask,
+		Height:    int64(pts.Height()),
 		StateRoot: pts.ParentState().String(),
+		Task:      MessagesTask,
 	}
 
 	emsgs, err := p.node.GetExecutedMessageForTipset(ctx, ts, pts)

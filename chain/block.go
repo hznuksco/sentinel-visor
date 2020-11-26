@@ -35,8 +35,8 @@ func (p *BlockProcessor) ProcessTipSet(ctx context.Context, ts *types.TipSet) (m
 
 	report := &visormodel.ProcessingReport{
 		Height:    int64(ts.Height()),
-		Task:      BlocksTask,
 		StateRoot: ts.ParentState().String(),
+		Task:      BlocksTask,
 	}
 
 	return pl, report, nil

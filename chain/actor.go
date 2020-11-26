@@ -79,8 +79,8 @@ func (p *ActorStateProcessor) processStateChanges(ctx context.Context, ts *types
 
 	report := &visormodel.ProcessingReport{
 		Height:    int64(ts.Height()),
+		StateRoot: ts.ParentState().String(),
 		Task:      ActorStateTask,
-		StateRoot: pts.ParentState().String(),
 		Status:    visormodel.ProcessingStatusOK,
 	}
 
